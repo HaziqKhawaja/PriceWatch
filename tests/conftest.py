@@ -15,6 +15,8 @@ from sqlalchemy.orm import Session
 from app.config import get_settings
 from app.db import get_db
 from app.main import app
+from app.models import User
+from app.services.auth import create_access_token, create_user
 
 ALEMBIC_INI = Path(__file__).resolve().parent.parent / "alembic.ini"
 
@@ -53,3 +55,33 @@ def client(db_session: Session) -> Iterator[TestClient]:
     with TestClient(app) as test_client:
         yield test_client
     app.dependency_overrides.clear()
+
+
+@pytest.fixture
+def user(db_session: Session) -> User:
+    return create_user(db_session, "user@example.com", "user-password")
+
+
+@pytest.fixture
+def admin(db_session: Session) -> User:
+    return create_user(db_session, "admin@example.com", "admin-password", role="admin")
+
+
+@pytest.fixture
+def user_token(user: User) -> str:
+    return create_access_token(user)
+
+
+@pytest.fixture
+def admin_token(admin: User) -> str:
+    return create_access_token(admin)
+
+
+@pytest.fixture
+def auth_headers(user_token: str) -> dict[str, str]:
+    return {"Authorization": f"Bearer {user_token}"}
+
+
+@pytest.fixture
+def admin_headers(admin_token: str) -> dict[str, str]:
+    return {"Authorization": f"Bearer {admin_token}"}

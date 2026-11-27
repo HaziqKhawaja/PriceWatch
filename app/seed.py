@@ -3,8 +3,10 @@ import logging
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
+from app.config import get_settings
 from app.db import SessionLocal
 from app.models import Retailer
+from app.services.auth import create_user, get_user_by_email
 
 logger = logging.getLogger(__name__)
 
@@ -26,11 +28,23 @@ def seed_retailers(db: Session) -> None:
     db.commit()
 
 
+def seed_admin(db: Session) -> None:
+    settings = get_settings()
+    if not settings.ADMIN_EMAIL or not settings.ADMIN_PASSWORD:
+        logger.info("ADMIN_EMAIL/ADMIN_PASSWORD not set; skipping admin seed")
+        return
+    if get_user_by_email(db, settings.ADMIN_EMAIL) is not None:
+        logger.info("Admin user already exists; skipping")
+        return
+    create_user(db, settings.ADMIN_EMAIL, settings.ADMIN_PASSWORD, role="admin")
+    logger.info("Seeded admin user")
+
+
 def main() -> None:
     logging.basicConfig(level=logging.INFO)
     with SessionLocal() as db:
         seed_retailers(db)
-        # TODO(milestone 2): seed the admin user from ADMIN_EMAIL / ADMIN_PASSWORD.
+        seed_admin(db)
     logger.info("Seeded %d retailers", len(RETAILERS))
 
 
