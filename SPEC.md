@@ -312,7 +312,13 @@ All logic lives in `app/services/analytics.py` as pure functions that take a Dat
 3. **Moving averages** — 7-day and 30-day rolling means over the daily series, `min_periods=1`.
 4. **Stats** — computed over the window: `current`, `min`, `max`, `mean`, `pct_change` over the window (first to last daily price), `is_all_time_low` flag, and current price vs 30-day average.
 
-**Query parameters**: `days` (window, default 90), `include_outliers` (default false).
+**Query parameters**: `days` (window, default 90, range 1–3650), `include_outliers` (default false).
+
+**Windowing rules**
+
+- Moving averages are computed over the full daily history *before* the window is cut, so `ma_30` on the first window day already reflects the preceding 30 days.
+- The window is the last `days` calendar days (UTC) ending today. The series never extends past the last observed day.
+- `include_outliers=true` skips filtering entirely (including the `price <= 0` rule). If that makes a percentage's base 0, the percentage is `null`.
 
 **Trends output shape**
 
