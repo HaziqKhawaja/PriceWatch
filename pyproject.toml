@@ -18,8 +18,7 @@ known-third-party = ["alembic"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
-# raised to 85 in milestone 7
-addopts = "--cov=app --cov-report=term-missing --cov-fail-under=0"
+addopts = "--cov=app --cov-report=term-missing --cov-fail-under=85"
 
 [tool.coverage.run]
 branch = true

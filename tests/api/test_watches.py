@@ -240,3 +240,15 @@ def test_delete(client, auth_headers, db_session, user, product):
     w = make_watch(db_session, user, product)
     assert client.delete(f"{URL}/{w.id}", headers=auth_headers).status_code == 204
     assert client.delete(f"{URL}/{w.id}", headers=auth_headers).status_code == 404
+
+
+def test_create_watch_race_integrity_error_returns_409(
+    client, auth_headers, user, product, db_session, monkeypatch
+):
+    db_session.add(Watch(user_id=user.id, product_id=product.id))
+    db_session.flush()
+    # Pre-check select misses (concurrent insert); the unique constraint still fires.
+    monkeypatch.setattr(db_session, "scalar", lambda *args, **kwargs: None)
+    resp = client.post(URL, json={"product_id": product.id}, headers=auth_headers)
+    assert resp.status_code == 409
+    assert resp.json()["detail"] == "Already watching this product"

@@ -221,3 +221,10 @@ def test_build_trends_single_point(include_outliers):
     result = build_trends(frame([9.5]), days=7, include_outliers=include_outliers, now=ts(1, 12))
     assert len(result.series) == 1
     assert result.stats["pct_change"] == 0.0
+
+
+def test_pct_zero_base_is_none():
+    from app.services.analytics import _pct
+
+    assert _pct(5.0, 0.0) is None
+    assert _pct(110.0, 100.0) == 10.0

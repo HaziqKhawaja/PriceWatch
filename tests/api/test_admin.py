@@ -142,3 +142,14 @@ def test_list_scrape_runs(client: TestClient, admin_headers, db_session: Session
     assert [r["succeeded"] for r in body["items"]] == [2, 1]
     page2 = client.get(f"{BASE}/scrape-runs?limit=2&offset=2", headers=admin_headers).json()
     assert [r["succeeded"] for r in page2["items"]] == [0]
+
+
+def test_create_retailer_race_integrity_error_returns_409(
+    client: TestClient, admin_headers, seed_retailers, db_session, monkeypatch
+):
+    # Pre-check select misses (concurrent insert); the unique constraint still fires.
+    monkeypatch.setattr(db_session, "scalar", lambda *args, **kwargs: None)
+    body = {"name": "Dup", "domain": "shopalpha.mock", "scraper_key": "shopalpha"}
+    resp = client.post(f"{BASE}/retailers", json=body, headers=admin_headers)
+    assert resp.status_code == 409
+    assert resp.json()["detail"] == "Retailer domain already exists"

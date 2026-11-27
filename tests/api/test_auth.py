@@ -111,3 +111,11 @@ def test_admin_route_unauthenticated(client: TestClient):
 def test_admin_route_ok_for_admin(client: TestClient, admin_headers: dict[str, str]):
     resp = client.get(ADMIN_ROUTE, headers=admin_headers)
     assert resp.status_code == 200
+
+
+def test_register_race_integrity_error_returns_409(client: TestClient, user, monkeypatch):
+    # Pre-check misses (as in a concurrent registration); the unique constraint still fires.
+    monkeypatch.setattr("app.api.routes.auth.get_user_by_email", lambda db, email: None)
+    resp = client.post(REGISTER, json={"email": user.email, "password": "password123"})
+    assert resp.status_code == 409
+    assert resp.json()["detail"] == "Email already registered"

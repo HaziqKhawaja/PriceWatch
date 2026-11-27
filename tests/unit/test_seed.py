@@ -1,10 +1,10 @@
 import pytest
 from sqlalchemy import func, select
-from sqlalchemy.orm import Session
+from sqlalchemy.orm import Session, sessionmaker
 
 from app.config import get_settings
 from app.models import Retailer, User
-from app.seed import seed_admin, seed_retailers
+from app.seed import main, seed_admin, seed_retailers
 from app.services.auth import verify_password
 
 
@@ -53,3 +53,13 @@ def test_seed_admin_skipped_when_unset(db_session: Session, admin_env):
     admin_env("root@example.com", None)
     seed_admin(db_session)
     assert count_users(db_session) == 0
+
+
+def test_main_seeds_retailers_and_admin(db_session: Session, admin_env, monkeypatch):
+    admin_env("root@example.com", "root-password")
+    factory = sessionmaker(bind=db_session.get_bind(), join_transaction_mode="create_savepoint")
+    monkeypatch.setattr("app.seed.SessionLocal", factory)
+    main()
+    assert db_session.scalar(select(func.count()).select_from(Retailer)) == 3
+    created = db_session.scalar(select(User).where(User.email == "root@example.com"))
+    assert created is not None and created.role == "admin"

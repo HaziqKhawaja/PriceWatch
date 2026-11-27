@@ -127,3 +127,67 @@ def test_gammagoods_bad_price_stock_title():
     no_stock = load("gammagoods_product.html").replace('class="stock-status"', 'class="x"')
     with pytest.raises(ParseError):
         scraper.parse(no_stock)
+
+
+def _ld(payload: str) -> str:
+    return f'<script type="application/ld+json">{payload}</script>'
+
+
+SA_PRODUCT = (
+    '{"@type": "Product", "name": " X ", "sku": "S1", "offers": '
+    '{"price": "10", "availability": "https://schema.org/InStock"}}'
+)
+
+
+def test_shopalpha_malformed_block_skipped_for_later_valid_block():
+    page = _ld("{not json") + _ld(SA_PRODUCT)
+    assert ShopAlphaScraper().parse(page).title == "X"
+
+
+def test_shopalpha_type_list_and_list_offers():
+    product = (
+        '{"@type": ["Thing", "Product"], "name": "X", "offers": '
+        '[{"price": "$1,010.5", "availability": "OutOfStock", "priceCurrency": "EUR"}]}'
+    )
+    result = ShopAlphaScraper().parse(_ld(product))
+    assert result.price == Decimal("1010.50")
+    assert result.in_stock is False
+    assert result.currency == "EUR"
+    assert result.external_id is None
+
+
+@pytest.mark.parametrize(
+    "payload",
+    [
+        "42",
+        '"just a string"',
+        '[1, {"@type": "Thing"}]',
+        '{"@type": "Thing"}',
+        '{"@graph": "nope"}',
+        '{"@type": "Product", "name": "X"}',
+        '{"@type": "Product", "name": "X", "offers": []}',
+        '{"@type": "Product", "name": "X", "offers": "free"}',
+        '{"@type": "Product", "offers": {"price": "1", "availability": "InStock"}}',
+        '{"@type": "Product", "name": "  ", "offers": {"price": "1", "availability": "InStock"}}',
+        '{"@type": "Product", "name": "X", "offers": {"price": "1"}}',
+        '{"@type": "Product", "name": "X", "offers": {"price": "1", "availability": 3}}',
+    ],
+)
+def test_shopalpha_bad_json_ld_raises(payload):
+    with pytest.raises(ParseError):
+        ShopAlphaScraper().parse(_ld(payload))
+
+
+@pytest.mark.parametrize("raw", ["-1", "NaN", "Infinity", "", None])
+def test_parse_price_rejects(raw):
+    from app.scrapers.base import parse_price
+
+    with pytest.raises(ParseError):
+        parse_price(raw)
+
+
+def test_matches_handles_invalid_url():
+    scraper = ShopAlphaScraper()
+    assert scraper.matches("http://shopalpha.mock/x") is True
+    assert scraper.matches("http://[::1/x") is False
+    assert scraper.matches("/relative") is False

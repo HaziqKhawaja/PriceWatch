@@ -44,3 +44,37 @@ def test_add_product_race_reuses_existing(db_session, user, seed_retailers, monk
     assert created is False
     assert product.title == "Winner"
     assert watch.product_id == product.id
+
+
+def test_unknown_scraper_key_is_unsupported(db_session, user):
+    from app.models import Retailer
+    from app.services import products as svc
+
+    db_session.add(
+        Retailer(
+            name="Ghost",
+            domain="ghost.mock",
+            scraper_key="nonexistent",
+            active=True,
+            rate_limit_seconds=1,
+        )
+    )
+    db_session.flush()
+    with pytest.raises(svc.UnsupportedRetailerError):
+        svc.add_product_for_user(db_session, user, "http://ghost.mock/items/1")
+
+
+def test_integrity_error_without_winner_is_reraised(db_session, user, seed_retailers, monkeypatch):
+    from decimal import Decimal
+
+    from sqlalchemy.exc import IntegrityError
+
+    from app.scrapers.base import ScrapeResult
+    from app.services import products as svc
+
+    # A NOT NULL violation (not a duplicate URL) leaves no existing row to reuse.
+    monkeypatch.setattr(
+        svc, "scrape", lambda url, scraper: ScrapeResult(Decimal("5.00"), True, None, "X")
+    )
+    with pytest.raises(IntegrityError):
+        svc.add_product_for_user(db_session, user, "http://shopalpha.mock:8080/items/9")

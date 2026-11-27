@@ -759,7 +759,7 @@ Run tests with `docker compose run --rm api pytest` (with `db-test` up).
 | `up` | `docker compose up --build -d` |
 | `down` | `docker compose down` |
 | `test` | `docker compose up -d db-test && docker compose run --rm api pytest` |
-| `lint` | `docker compose run --rm api ruff check .` |
+| `lint` | `docker compose run --rm --no-deps api sh -c "ruff check . && ruff format --check ."` |
 | `migrate` | `docker compose run --rm api alembic upgrade head` |
 
 ---
@@ -807,11 +807,13 @@ jobs:
       - name: Install dependencies
         run: pip install -r requirements.txt -r requirements-dev.txt
       - name: Lint
-        run: ruff check .
+        run: |
+          ruff check .
+          ruff format --check .
       - name: Apply migrations
         run: alembic upgrade head
       - name: Test
-        run: pytest --cov=app --cov-report=term-missing --cov-fail-under=85
+        run: pytest   # coverage flags and the 85% gate come from pyproject addopts
 ```
 
 ---

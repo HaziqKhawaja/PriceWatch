@@ -263,3 +263,32 @@ def test_webhook_exception_does_not_fail_product(db_session, seed_retailers, fac
     execute_scrape_run(run.id, factory)
     db_session.refresh(run)
     assert (run.succeeded, run.failed) == (1, 0)
+
+
+def test_missing_scraper_counts_as_failure(db_session, seed_retailers, factory, evaluate_calls):
+    retailer = db_session.scalar(select(Retailer).where(Retailer.domain == "shopalpha.mock"))
+    retailer.scraper_key = "nonexistent"
+    make_product(db_session, "shopalpha.mock", SA)
+    run = new_run(db_session)
+    execute_scrape_run(run.id, factory)
+    db_session.refresh(run)
+    assert (run.products_attempted, run.succeeded, run.failed) == (1, 0, 1)
+    assert "LookupError" in run.error_summary
+
+
+def test_run_aborted_is_recorded(db_session, factory):
+    run = new_run(db_session)
+
+    class BrokenExecute(KeepOpen):
+        def execute(self, *args, **kwargs):
+            raise RuntimeError("db exploded")
+
+    execute_scrape_run(run.id, lambda: BrokenExecute(db_session))
+    db_session.refresh(run)
+    assert run.finished_at is not None
+    assert run.error_summary.startswith("run aborted: RuntimeError")
+
+
+def test_execute_missing_run_row_is_noop(db_session, factory):
+    execute_scrape_run(999999, factory)
+    assert db_session.scalar(select(ScrapeRun).where(ScrapeRun.id == 999999)) is None

@@ -136,3 +136,11 @@ def test_never_raises(db_session, setup, monkeypatch):
 
     monkeypatch.setattr(webhooks._session, "post", boom)
     webhooks.deliver_notifications(db_session, [n.id, 999999])
+
+
+def test_commit_failure_is_swallowed(db_session, monkeypatch):
+    def fail_commit():
+        raise RuntimeError("commit failed")
+
+    monkeypatch.setattr(db_session, "commit", fail_commit)
+    webhooks.deliver_notifications(db_session, [])

@@ -58,3 +58,12 @@ def test_4xx_not_retried(sleeps):
         fetch_html(URL)
     assert len(responses.calls) == 1
     assert sleeps == []
+
+
+@responses.activate
+def test_non_connection_request_exception_not_retried(sleeps):
+    responses.add(responses.GET, URL, body=requests.exceptions.InvalidURL("bad url"))
+    with pytest.raises(FetchError, match="Network error"):
+        fetch_html(URL)
+    assert sleeps == []
+    assert len(responses.calls) == 1
