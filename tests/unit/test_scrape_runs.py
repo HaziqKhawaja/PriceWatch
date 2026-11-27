@@ -58,7 +58,7 @@ def evaluate_calls(monkeypatch):
     monkeypatch.setattr(
         scrape_runs.alerts,
         "evaluate_watches",
-        lambda db, product, previous, current: calls.append((product.id, previous, current)),
+        lambda db, product, previous, current: calls.append((product.id, previous, current)) or [],
     )
     return calls
 
@@ -203,3 +203,63 @@ def test_evaluate_watches_previous(db_session, seed_retailers, factory, evaluate
     second = evaluate_calls[1]
     assert second[1] is first[2]
     assert second[2] is not first[2]
+
+
+def _alert_setup(db, hook_status):
+    from app.models import Notification, Watch
+    from app.services.auth import create_user
+
+    p = make_product(db, "shopalpha.mock", SA)
+    u = create_user(db, "alert@example.com", "pw-pw-pw-pw")
+    w = Watch(
+        user_id=u.id,
+        product_id=p.id,
+        target_price=Decimal("500"),
+        webhook_url="http://hook.example/in",
+    )
+    db.add(w)
+    db.commit()
+    responses.get(SA, body=html("shopalpha_in_stock.html"))
+    responses.post("http://hook.example/in", status=hook_status)
+    return p, Notification
+
+
+@responses.activate
+def test_alert_creates_notification_and_calls_webhook(db_session, seed_retailers, factory):
+    p, Notification = _alert_setup(db_session, 200)
+    run = new_run(db_session)
+    execute_scrape_run(run.id, factory)
+    db_session.refresh(run)
+    assert (run.succeeded, run.failed) == (1, 0)
+    n = db_session.scalar(select(Notification))
+    assert n.type == "price_drop"
+    assert n.delivered is True
+    assert [c.request.url for c in responses.calls] == [SA, "http://hook.example/in"]
+
+
+@responses.activate
+def test_webhook_500_still_counts_success(db_session, seed_retailers, factory):
+    p, Notification = _alert_setup(db_session, 500)
+    run = new_run(db_session)
+    execute_scrape_run(run.id, factory)
+    db_session.refresh(run)
+    assert (run.succeeded, run.failed) == (1, 0)
+    n = db_session.scalar(select(Notification))
+    assert n.delivered is False
+    assert n.delivery_error == "HTTP 500"
+    db_session.refresh(p)
+    assert p.last_scraped_at is not None
+
+
+@responses.activate
+def test_webhook_exception_does_not_fail_product(db_session, seed_retailers, factory, monkeypatch):
+    _alert_setup(db_session, 200)
+
+    def boom(db, ids):
+        raise RuntimeError("boom")
+
+    monkeypatch.setattr(scrape_runs.webhooks, "deliver_notifications", boom)
+    run = new_run(db_session)
+    execute_scrape_run(run.id, factory)
+    db_session.refresh(run)
+    assert (run.succeeded, run.failed) == (1, 0)

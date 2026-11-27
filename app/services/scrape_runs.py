@@ -8,7 +8,7 @@ from sqlalchemy.orm import Session
 from app.db import SessionLocal
 from app.models import PriceSnapshot, Product, Retailer, ScrapeRun
 from app.scrapers.registry import get_scraper_by_key
-from app.services import alerts
+from app.services import alerts, webhooks
 from app.services.rate_limit import rate_limiter
 from app.services.scraping import scrape
 
@@ -77,8 +77,13 @@ def _scrape_product(db: Session, product_id: int) -> None:
     if result.title and result.title != product.title:
         product.title = result.title
     db.flush()
-    alerts.evaluate_watches(db, product, previous, snapshot)
+    notification_ids = alerts.evaluate_watches(db, product, previous, snapshot)
     db.commit()
+    try:
+        webhooks.deliver_notifications(db, notification_ids)
+    except Exception:
+        db.rollback()
+        logger.exception("Webhook delivery failed for product %s", product_id)
 
 
 def execute_scrape_run(

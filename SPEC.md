@@ -237,6 +237,7 @@ Index: `ix_price_snapshots_product_id_scraped_at` on (`product_id`, `scraped_at`
 | notify_on_restock | boolean | NOT NULL, default false |
 | webhook_url | text | NULL |
 | active | boolean | NOT NULL, default true |
+| price_alert_active | boolean | NOT NULL, default false (set when a price-drop alert fires; see section 7) |
 | created_at | timestamptz | NOT NULL, default now() |
 
 Constraint: UNIQUE (`user_id`, `product_id`).
@@ -356,19 +357,19 @@ The all-time-low flag compares the current price to the minimum across the produ
 
 Alerts are evaluated by the alerts service after every snapshot is written, for each active watch on that product. Rules compare the new snapshot against the **previous** snapshot (if any).
 
-**Price drop** triggers when all hold:
-- `watch.target_price` is not null,
-- `new_price <= target_price`,
-- and the previous price was `> target_price`, or there is no previous snapshot.
+**Price drop** uses a per-watch flag, `watches.price_alert_active`:
+- If `target_price` is set, the new price is `<= target_price`, and the flag is off, a notification is created and the flag is turned on.
+- If the new price is `> target_price`, the flag is turned off, which re-arms the alert.
+- Changing `target_price` through `PATCH /watches/{id}` also turns the flag off.
 
-This is an edge trigger: while the price stays at or below target no further alerts fire; it re-arms once the price rises above target.
+This fires once per drop below target and never repeats while the price stays there. Unlike a rule that compares each snapshot with the previous one, it also fires when a watch is created (or its target raised) while the price is already below target.
 
 **Restock** triggers when `watch.notify_on_restock` is true and stock went from `false` (previous snapshot) to `true` (new snapshot). A first snapshot (no previous) never triggers a restock.
 
 **On trigger**
 
-1. Insert a `notifications` row (`type`, `message`, `price`).
-2. If `webhook_url` is set, POST a JSON payload with a 5s timeout. On success set `delivered = true`. On failure or non-2xx, store the error in `delivery_error`. No retries in v1.
+1. Insert a `notifications` row (`type`, `message`, `price`) in the same transaction as the snapshot.
+2. After that transaction commits, if `webhook_url` is set, POST a JSON payload with a 5s timeout. On success set `delivered = true`. On failure or non-2xx, store the error in `delivery_error`. No retries in v1. A webhook failure never marks the product scrape as failed.
 
 **Example webhook payload**
 
@@ -473,7 +474,7 @@ All routes live under `/api/v1`, except `GET /health`. Auth is a JWT bearer toke
 | Method | Path | Auth | Description |
 |--------|------|------|-------------|
 | GET | `/notifications` | user | Current user's notifications, newest first, paginated. `?unread=true` filters to `read_at IS NULL`. |
-| POST | `/notifications/{id}/read` | user | Mark a notification read (sets `read_at`). Owner only (404 otherwise). |
+| POST | `/notifications/{id}/read` | user | Mark a notification read (sets `read_at`; idempotent). Owner only (404 otherwise). |
 
 ### 9.8 Admin
 
@@ -844,7 +845,7 @@ jobs:
 
 6. **Watches, alerts, webhooks.**
    - Watch CRUD works with owner-only enforcement (404 for others, 409 for duplicates).
-   - Price-drop alerts fire only on the downward crossing of `target_price` (no repeat while the price stays below); restock alerts fire only on false to true.
+   - Price-drop alerts fire once per drop to or below `target_price` (no repeat while the price stays below; re-armed when it rises above or the target changes); restock alerts fire only on false to true.
    - Each alert writes a `notifications` row; webhook delivery POSTs JSON with a 5s timeout and records failures in `delivery_error`; `GET /notifications` supports `?unread`.
 
 7. **Test hardening and CI.**
@@ -870,3 +871,4 @@ Open questions:
 - Webhook retry policy (v1 records failure and does not retry).
 - Snapshot retention and partitioning once `price_snapshots` grows large.
 - Whether webhook payloads should be signed (HMAC) for receivers.
+- Webhook URLs are user-supplied and fetched server-side. Before any non-local deployment, block private and internal addresses to prevent SSRF.
