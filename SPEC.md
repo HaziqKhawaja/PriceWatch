@@ -103,31 +103,28 @@ PriceWatch is a REST API that tracks price and stock of products across retailer
 
 ```python
 # app/scrapers/base.py
-from abc import ABC, abstractmethod
-from dataclasses import dataclass
-from decimal import Decimal
-
 @dataclass(frozen=True)
 class ScrapeResult:
-    price: Decimal
+    price: Decimal              # quantized to 0.01
     in_stock: bool
     title: str
+    external_id: str | None     # retailer SKU, stored in products.external_id
     currency: str = "USD"
 
-class BaseScraper(ABC):
-    key: str  # matches retailers.scraper_key
+class ParseError(Exception): ...
 
-    @abstractmethod
-    def matches(self, url: str) -> bool: ...
+class BaseScraper(ABC):
+    key: str     # matches retailers.scraper_key
+    domain: str  # hostname this scraper handles
+
+    def matches(self, url: str) -> bool: ...  # hostname equality, port ignored
 
     @abstractmethod
     def parse(self, html: str) -> ScrapeResult: ...  # raises ParseError on failure
 
-# app/scrapers/registry.py
-REGISTRY: dict[str, BaseScraper] = {}   # domain -> scraper instance
-
-def register(domain: str, scraper: BaseScraper) -> None: ...
-def get_scraper(url: str) -> BaseScraper | None: ...  # None => unsupported domain
+# app/scrapers/registry.py  (keyed by scraper_key)
+def get_scraper_by_key(key: str) -> BaseScraper | None: ...
+def get_scraper_for_url(url: str) -> BaseScraper | None: ...  # None => unsupported
 ```
 
 ### 3.3 Mock retailers
@@ -301,8 +298,8 @@ Constraint: UNIQUE (`user_id`, `product_id`).
 **Adding a product** (`POST /products` with a URL)
 
 1. Match the URL's domain to a retailer; respond 400 if unsupported.
-2. If the product URL already exists, reuse it. Otherwise scrape immediately and create the product.
-3. Create a watch for the requesting user (unique per user/product).
+2. Normalize the URL (lowercase scheme and host, drop fragment and trailing slash). If a product with that URL exists, reuse it without scraping. Otherwise scrape immediately (502 on fetch/parse failure) and create the product plus its first snapshot.
+3. Get or create the requesting user's watch (re-posting returns the existing watch).
 
 ## 6. Analytics (Pandas)
 
@@ -423,6 +420,7 @@ All routes live under `/api/v1`, except `GET /health`. Auth is a JWT bearer toke
 | 403 | Authenticated but not permitted (non-admin on admin route) |
 | 404 | Resource not found, or owned by another user (watches, notifications) |
 | 409 | Conflict (duplicate email on register; duplicate watch for the same user and product) |
+| 502 | Product page could not be fetched or parsed when adding a product |
 | 422 | Request validation failure |
 
 ### 9.2 Health

@@ -85,3 +85,10 @@ def auth_headers(user_token: str) -> dict[str, str]:
 @pytest.fixture
 def admin_headers(admin_token: str) -> dict[str, str]:
     return {"Authorization": f"Bearer {admin_token}"}
+
+
+@pytest.fixture
+def seed_retailers(db_session: Session) -> None:
+    from app.seed import seed_retailers as _seed
+
+    _seed(db_session)
