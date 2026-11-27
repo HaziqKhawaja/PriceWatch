@@ -111,6 +111,7 @@ Loaded from the environment (and `.env`) by `app/config.py`. Defaults below are 
 | `ADMIN_EMAIL` | unset | Admin seeded at startup (skipped if unset) |
 | `ADMIN_PASSWORD` | unset | Password for the seeded admin |
 | `LOG_LEVEL` | `INFO` | Log level |
+| `WEBHOOK_ALLOWED_HOSTS` | empty | Comma-separated hostnames exempt from the webhook private-address block (local testing only) |
 
 The mock retailer service also reads `MOCK_TICK_SECONDS` (default 300): mock prices and stock change each time the tick window rolls over, so lower it to see price movement sooner. It is not in `.env.example`; set it in the `mock-retailers` service environment in `docker-compose.yml` if you want to change it.
 
@@ -143,6 +144,7 @@ tests/           pytest suite
 - Price drop: uses a per-watch `price_alert_active` flag. Fires once when the price is at or below `target_price` and the flag is off; the flag re-arms when the price rises above target or when `target_price` is changed via PATCH.
 - Restock: fires when `notify_on_restock` is set and stock goes from out to in.
 - Each trigger inserts a notification; if the watch has a `webhook_url`, a JSON payload is POSTed after commit (5s timeout, no retries). Delivery status is recorded on the notification and a webhook failure never fails the scrape.
+- Webhook URLs must point at public addresses. Loopback, private, link-local (cloud metadata), CGNAT and similar ranges are rejected with 422 when the watch is saved, and are checked again when the socket opens, against the exact IP the request connects to, which defeats DNS rebinding. Redirects are not followed. To test against a receiver on your machine, set `WEBHOOK_ALLOWED_HOSTS=host.docker.internal` in `.env`.
 
 ## Development
 
@@ -172,7 +174,6 @@ CI (`.github/workflows/ci.yml`) runs on every push and pull request: Postgres 16
 
 From SPEC.md section 15:
 
-- Webhook URLs are user-supplied and fetched server-side. Block private and internal addresses (SSRF) before any non-local deployment.
 - Webhooks are not retried and payloads are not signed.
 - No snapshot retention or partitioning yet.
 - USD only; no email alerts; no frontend.

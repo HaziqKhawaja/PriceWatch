@@ -395,6 +395,16 @@ This fires once per drop below target and never repeats while the price stays th
 
 For `restock`, `type` is `"restock"` and `target_price` may be null.
 
+### Webhook URL safety (SSRF)
+
+Webhook URLs are user-supplied and requested by the server, so they are restricted to public destinations (`app/services/url_safety.py`):
+
+- **On write** (`POST /watches`, `PATCH /watches/{id}`), the URL must be absolute `http`/`https`, contain no credentials, and have a valid port. An IP-literal host must be public. A hostname must resolve, and every address it resolves to must be public. Violations return 422.
+- **Public** means globally routable unicast (`ipaddress.is_global` and not multicast). This blocks loopback, RFC 1918 private ranges, link-local (including cloud metadata `169.254.169.254`), CGNAT `100.64.0.0/10`, unspecified, reserved, multicast, broadcast, and IPv6 ULA and link-local. IPv4-mapped, 6to4, and Teredo IPv6 addresses are judged by their embedded IPv4 address.
+- **On delivery**, the URL is re-checked, so rows stored before this rule or under different DNS are blocked with `delivery_error` set to `Blocked: ...`. The HTTP transport also resolves and checks the host when it opens the socket, then connects to that exact vetted IP. This defeats DNS rebinding between the check and the request. TLS SNI and certificate verification still use the hostname.
+- Redirects are not followed (a 3xx is recorded as a failed delivery), and proxy environment variables are ignored.
+- `WEBHOOK_ALLOWED_HOSTS` (comma-separated hostnames, empty by default) exempts specific hosts from the address check. It is meant for local testing, e.g. `host.docker.internal`, and should stay empty in production.
+
 ## 8. Authentication & Authorization
 
 - **Tokens**: JWT bearer, HS256, signed with `JWT_SECRET`, expiry `JWT_EXPIRE_MINUTES` (default 60). Claims: `sub` (user id), `role`, `exp`. Implemented with PyJWT.
@@ -604,6 +614,7 @@ Settings are loaded by `pydantic-settings` from environment variables (and `.env
 | `ADMIN_EMAIL` | none | Email of the seeded first admin (seeding is skipped if unset). |
 | `ADMIN_PASSWORD` | none | Password of the seeded first admin. |
 | `LOG_LEVEL` | `INFO` | Python logging level. |
+| `WEBHOOK_ALLOWED_HOSTS` | empty | Comma-separated hostnames exempt from the webhook private-address block (local testing only; see section 7). |
 
 When running on the host (outside compose), hostnames `db` and `db-test` become `localhost` with the mapped ports from section 12.
 
@@ -873,4 +884,3 @@ Open questions:
 - Webhook retry policy (v1 records failure and does not retry).
 - Snapshot retention and partitioning once `price_snapshots` grows large.
 - Whether webhook payloads should be signed (HMAC) for receivers.
-- Webhook URLs are user-supplied and fetched server-side. Before any non-local deployment, block private and internal addresses to prevent SSRF.

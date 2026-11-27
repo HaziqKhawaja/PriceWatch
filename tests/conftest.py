@@ -18,6 +18,35 @@ from app.main import app
 from app.models import User
 from app.services.auth import create_access_token, create_user
 
+# Fake DNS for tests: no test may hit real DNS. Tests can add entries via the
+# `fake_dns` fixture (dict of hostname -> list of IP strings).
+PUBLIC_TEST_IP = "93.184.215.14"
+
+
+@pytest.fixture(autouse=True)
+def fake_dns(monkeypatch) -> dict[str, list[str]]:
+    import ipaddress
+
+    from app.services import url_safety
+
+    table: dict[str, list[str]] = {"localhost": ["127.0.0.1", "::1"]}
+
+    def resolve(host: str, port: int) -> list[str]:
+        host = host.lower().rstrip(".")
+        try:
+            return [str(ipaddress.ip_address(host.strip("[]")))]
+        except ValueError:
+            pass
+        if host in table:
+            return table[host]
+        if host.endswith(".invalid"):
+            raise url_safety.UnsafeURLError(f"Host {host!r} could not be resolved")
+        return [PUBLIC_TEST_IP]
+
+    monkeypatch.setattr(url_safety, "resolve_host", resolve)
+    return table
+
+
 ALEMBIC_INI = Path(__file__).resolve().parent.parent / "alembic.ini"
 
 

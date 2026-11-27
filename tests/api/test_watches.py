@@ -252,3 +252,72 @@ def test_create_watch_race_integrity_error_returns_409(
     resp = client.post(URL, json={"product_id": product.id}, headers=auth_headers)
     assert resp.status_code == 409
     assert resp.json()["detail"] == "Already watching this product"
+
+
+@pytest.mark.parametrize(
+    ("url", "message"),
+    [
+        ("http://127.0.0.1/x", "private or internal address"),
+        ("http://localhost:8000/x", "private or internal address"),
+        ("http://169.254.169.254/latest/meta-data", "private or internal address"),
+        ("http://[::1]/x", "private or internal address"),
+        ("http://[::ffff:10.0.0.1]/x", "private or internal address"),
+        ("http://user:pw@hooks.example.com/x", "credentials"),
+        ("http://internal.example/x", "private or internal address"),
+        ("http://nope.invalid/x", "could not be resolved"),
+    ],
+)
+def test_create_ssrf_webhook_rejected(client, auth_headers, product, fake_dns, url, message):
+    fake_dns["internal.example"] = ["10.0.0.5"]
+    resp = client.post(
+        URL, json={"product_id": product.id, "webhook_url": url}, headers=auth_headers
+    )
+    assert resp.status_code == 422
+    assert message in resp.json()["detail"][0]["msg"]
+
+
+def test_patch_private_webhook_rejected_and_unchanged(
+    client, auth_headers, db_session, user, product
+):
+    w = make_watch(db_session, user, product, webhook_url="http://h.example/x")
+    resp = client.patch(
+        f"{URL}/{w.id}", json={"webhook_url": "http://127.0.0.1/x"}, headers=auth_headers
+    )
+    assert resp.status_code == 422
+    assert "private or internal address" in resp.json()["detail"][0]["msg"]
+    db_session.refresh(w)
+    assert w.webhook_url == "http://h.example/x"
+
+
+def test_patch_null_still_clears_and_public_url_works(
+    client, auth_headers, db_session, user, product
+):
+    w = make_watch(db_session, user, product, webhook_url="http://h.example/x")
+    resp = client.patch(
+        f"{URL}/{w.id}", json={"webhook_url": "https://hooks.example.com/y"}, headers=auth_headers
+    )
+    assert resp.status_code == 200
+    assert resp.json()["webhook_url"] == "https://hooks.example.com/y"
+    resp = client.patch(f"{URL}/{w.id}", json={"webhook_url": None}, headers=auth_headers)
+    assert resp.status_code == 200
+    assert resp.json()["webhook_url"] is None
+
+
+def test_create_webhook_allowlisted_host_accepted(
+    client, auth_headers, product, fake_dns, monkeypatch
+):
+    from app.config import get_settings
+
+    fake_dns["host.docker.internal"] = ["192.168.65.254"]
+    monkeypatch.setenv("WEBHOOK_ALLOWED_HOSTS", "host.docker.internal")
+    get_settings.cache_clear()
+    try:
+        resp = client.post(
+            URL,
+            json={"product_id": product.id, "webhook_url": "http://host.docker.internal:9000/h"},
+            headers=auth_headers,
+        )
+    finally:
+        monkeypatch.delenv("WEBHOOK_ALLOWED_HOSTS")
+        get_settings.cache_clear()
+    assert resp.status_code == 201

@@ -5,9 +5,16 @@ from typing import Annotated
 from pydantic import AfterValidator, BaseModel, ConfigDict, Field
 
 from app.schemas.product import Money, _check_url
+from app.services import url_safety
+
+
+def _check_outbound(value: str) -> str:
+    # Module-attribute lookup at call time so tests can monkeypatch it.
+    return url_safety.check_outbound_url(value)
+
 
 TargetPrice = Annotated[Decimal, Field(gt=0, max_digits=10, decimal_places=2)]
-WebhookUrl = Annotated[str, AfterValidator(_check_url)]
+WebhookUrl = Annotated[str, AfterValidator(_check_url), AfterValidator(_check_outbound)]
 
 
 class WatchProduct(BaseModel):
