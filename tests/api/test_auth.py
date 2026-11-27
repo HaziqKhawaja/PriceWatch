@@ -8,7 +8,7 @@ from app.services.auth import create_access_token
 REGISTER = "/api/v1/auth/register"
 LOGIN = "/api/v1/auth/login"
 ME = "/api/v1/auth/me"
-PING = "/api/v1/admin/ping"
+ADMIN_ROUTE = "/api/v1/admin/retailers"
 
 
 def test_register_success(client: TestClient):
@@ -98,17 +98,16 @@ def test_me_with_token_for_deleted_user(client: TestClient, db_session, user: Us
     assert resp.status_code == 401
 
 
-def test_admin_ping_forbidden_for_user(client: TestClient, auth_headers: dict[str, str]):
-    resp = client.get(PING, headers=auth_headers)
+def test_admin_route_forbidden_for_user(client: TestClient, auth_headers: dict[str, str]):
+    resp = client.get(ADMIN_ROUTE, headers=auth_headers)
     assert resp.status_code == 403
     assert resp.json()["detail"] == "Admin privileges required"
 
 
-def test_admin_ping_unauthenticated(client: TestClient):
-    assert client.get(PING).status_code == 401
+def test_admin_route_unauthenticated(client: TestClient):
+    assert client.get(ADMIN_ROUTE).status_code == 401
 
 
-def test_admin_ping_ok_for_admin(client: TestClient, admin_headers: dict[str, str]):
-    resp = client.get(PING, headers=admin_headers)
+def test_admin_route_ok_for_admin(client: TestClient, admin_headers: dict[str, str]):
+    resp = client.get(ADMIN_ROUTE, headers=admin_headers)
     assert resp.status_code == 200
-    assert resp.json() == {"status": "ok"}

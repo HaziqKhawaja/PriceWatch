@@ -2,6 +2,7 @@ from datetime import UTC, datetime
 from urllib.parse import urlsplit, urlunsplit
 
 from sqlalchemy import select
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
 from app.models import PriceSnapshot, Product, Retailer, User, Watch
@@ -55,7 +56,7 @@ def add_product_for_user(db: Session, user: User, url: str) -> tuple[Product, Wa
             raise ScrapeFailedError(str(exc)) from exc
         now = datetime.now(UTC)
         product = Product(
-            retailer=retailer,
+            retailer_id=retailer.id,
             url=normalized,
             title=result.title,
             external_id=result.external_id,
@@ -66,8 +67,15 @@ def add_product_for_user(db: Session, user: User, url: str) -> tuple[Product, Wa
         product.snapshots.append(
             PriceSnapshot(price=result.price, in_stock=result.in_stock, scraped_at=now)
         )
-        db.add(product)
-        db.flush()
+        try:
+            with db.begin_nested():
+                db.add(product)
+        except IntegrityError:
+            # Concurrent insert of the same URL: reuse the winner's row.
+            product = db.scalar(select(Product).where(Product.url == normalized))
+            if product is None:
+                raise
+            created = False
 
     watch = db.scalar(select(Watch).where(Watch.user_id == user.id, Watch.product_id == product.id))
     if watch is None:

@@ -12,6 +12,7 @@ from sqlalchemy.orm import Session
 from app.api.routes import api_router
 from app.config import get_settings
 from app.db import get_db
+from app.scheduler import shutdown_scheduler, start_scheduler
 
 logger = logging.getLogger("pricewatch")
 
@@ -23,12 +24,11 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
         level=settings.LOG_LEVEL.upper(),
         format="%(asctime)s %(levelname)s %(name)s: %(message)s",
     )
-    if settings.SCHEDULER_ENABLED:
-        # TODO(milestone 4): start the APScheduler scrape job here.
-        logger.info("Scheduler enabled (not implemented yet)")
-    else:
-        logger.info("Scheduler disabled")
-    yield
+    scheduler = start_scheduler()
+    try:
+        yield
+    finally:
+        shutdown_scheduler(scheduler)
 
 
 app = FastAPI(title="PriceWatch", lifespan=lifespan)
